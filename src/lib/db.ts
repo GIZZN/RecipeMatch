@@ -4,24 +4,69 @@ let pool: Pool | null = null;
 
 export function getPool(): Pool {
   if (!pool) {
+    // Проверяем наличие обязательных переменных
+    if (!process.env.DATABASE_URL && (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_PASSWORD || !process.env.DB_NAME)) {
+      throw new Error('Database configuration missing. Please set DATABASE_URL or DB_HOST, DB_USER, DB_PASSWORD, DB_NAME environment variables.');
+    }
+
     const connectionString = process.env.DATABASE_URL || 
-      `postgresql://${process.env.DB_USER || 'postgres'}:${process.env.DB_PASSWORD || 'postgres'}@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || '5432'}/${process.env.DB_NAME || 'RecipeMatch'}`;
+      `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT || '5432'}/${process.env.DB_NAME}`;
+    
+    // Логируем информацию о подключении (без паролей)
+    console.log('Environment:', {
+      NODE_ENV: process.env.NODE_ENV,
+      VERCEL: process.env.VERCEL,
+      DATABASE_URL_EXISTS: !!process.env.DATABASE_URL,
+      DB_HOST: process.env.DB_HOST,
+      DB_PORT: process.env.DB_PORT || '5432',
+      DB_NAME: process.env.DB_NAME,
+      DB_USER: process.env.DB_USER,
+      DB_SSL: process.env.DB_SSL,
+      HAS_PASSWORD: !!process.env.DB_PASSWORD
+    });
+    
+    // Определяем нужен ли SSL
+    const forceNoSSL = process.env.DISABLE_SSL === 'true';
+    const sslRequired = process.env.DB_SSL === 'require' || 
+                       process.env.DATABASE_URL?.includes('sslmode=require');
+    
+    const needsSSL = !forceNoSSL && (
+      sslRequired ||
+      (process.env.NODE_ENV === 'production' && process.env.DB_HOST && process.env.DB_HOST !== 'localhost') ||
+      process.env.VERCEL
+    );
+    
+    console.log('SSL configuration:', { 
+      needsSSL, 
+      forceNoSSL, 
+      sslRequired, 
+      dbHost: process.env.DB_HOST,
+      nodeEnv: process.env.NODE_ENV 
+    });
+    
+    let sslConfig: boolean | { rejectUnauthorized: boolean } = false;
+    if (needsSSL) {
+      sslConfig = { 
+        rejectUnauthorized: false
+      };
+    }
     
     pool = new Pool({
       connectionString,
-      ssl: process.env.NODE_ENV === 'production' || process.env.VERCEL ? { 
-        rejectUnauthorized: false 
-      } : false,
-      // Настройки для Vercel
-      max: 20, // максимальное количество соединений в пуле
+      ssl: sslConfig,
+      // Настройки для Vercel и внешнего PostgreSQL
+      max: 10, // уменьшаем для внешнего сервера
+      min: 0, // минимальное количество соединений
       idleTimeoutMillis: 30000, // время ожидания перед закрытием неактивного соединения
-      connectionTimeoutMillis: 2000, // время ожидания подключения
+      connectionTimeoutMillis: 10000, // увеличиваем для внешнего сервера
       // Дополнительные настройки для стабильности
-      statement_timeout: 30000, // таймаут для SQL запросов
-      query_timeout: 30000,
-      // Keepalive для поддержания соединения
+      statement_timeout: 60000, // увеличиваем таймаут для SQL запросов
+      query_timeout: 60000,
+      // Keepalive для поддержания соединения через интернет
       keepAlive: true,
       keepAliveInitialDelayMillis: 10000,
+      // Настройки для работы с внешним сервером
+      application_name: 'RecipeMatch-Vercel',
     });
     
     pool.on('error', (err) => {
