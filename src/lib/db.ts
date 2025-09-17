@@ -9,11 +9,27 @@ export function getPool(): Pool {
     
     pool = new Pool({
       connectionString,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+      ssl: process.env.NODE_ENV === 'production' || process.env.VERCEL ? { 
+        rejectUnauthorized: false 
+      } : false,
+      // Настройки для Vercel
+      max: 20, // максимальное количество соединений в пуле
+      idleTimeoutMillis: 30000, // время ожидания перед закрытием неактивного соединения
+      connectionTimeoutMillis: 2000, // время ожидания подключения
+      // Дополнительные настройки для стабильности
+      statement_timeout: 30000, // таймаут для SQL запросов
+      query_timeout: 30000,
+      // Keepalive для поддержания соединения
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     });
     
     pool.on('error', (err) => {
       console.error('Database pool error:', err);
+    });
+
+    pool.on('connect', () => {
+      console.log('New database connection established');
     });
   }
   return pool;
@@ -21,12 +37,43 @@ export function getPool(): Pool {
 
 export async function query(text: string, params?: (string | number | boolean | null)[]): Promise<{ rows: unknown[]; rowCount: number | null }> {
   const pool = getPool();
-  const client = await pool.connect();
+  let client;
+  
   try {
+    client = await pool.connect();
     const result = await client.query(text, params);
     return result;
+  } catch (error) {
+    console.error('Database query error:', error);
+    throw error;
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
+  }
+}
+
+// Функция для корректного закрытия пула соединений
+export async function closePool(): Promise<void> {
+  if (pool) {
+    try {
+      await pool.end();
+      pool = null;
+      console.log('Database pool closed successfully');
+    } catch (error) {
+      console.error('Error closing database pool:', error);
+    }
+  }
+}
+
+// Функция для проверки подключения к базе данных
+export async function testConnection(): Promise<boolean> {
+  try {
+    const result = await query('SELECT 1 as test');
+    return result.rows.length > 0;
+  } catch (error) {
+    console.error('Database connection test failed:', error);
+    return false;
   }
 }
 
