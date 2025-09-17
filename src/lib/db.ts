@@ -31,8 +31,29 @@ export function getPool(): Pool {
       throw new Error(`Database configuration missing. Missing variables: ${missingVars.join(', ')}`);
     }
 
-    const connectionString = process.env.DATABASE_URL || 
+    // Определяем нужен ли SSL
+    const forceNoSSL = process.env.DISABLE_SSL === 'true';
+    const sslRequired = process.env.DB_SSL === 'require' || 
+                       process.env.DATABASE_URL?.includes('sslmode=require');
+    
+    // Если есть проблемы с самоподписанными сертификатами, можно отключить SSL
+    const hasSelfSignedCertIssue = process.env.ALLOW_SELF_SIGNED_CERT === 'true';
+    
+    const needsSSL = !forceNoSSL && (
+      sslRequired ||
+      (process.env.NODE_ENV === 'production' && process.env.DB_HOST && process.env.DB_HOST !== 'localhost') ||
+      process.env.VERCEL
+    );
+    
+    // Формируем строку подключения
+    let connectionString = process.env.DATABASE_URL || 
       `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT || '5432'}/${process.env.DB_NAME}`;
+    
+    // Если отключаем SSL, добавляем параметр в строку подключения
+    if (forceNoSSL && !process.env.DATABASE_URL) {
+      connectionString += '?sslmode=disable';
+      console.log('SSL disabled in connection string');
+    }
     
     console.log('Connection string (masked):', connectionString.replace(/:([^:@]+)@/, ':****@'));
     
@@ -49,30 +70,24 @@ export function getPool(): Pool {
       HAS_PASSWORD: !!process.env.DB_PASSWORD
     });
     
-    // Определяем нужен ли SSL
-    const forceNoSSL = process.env.DISABLE_SSL === 'true';
-    const sslRequired = process.env.DB_SSL === 'require' || 
-                       process.env.DATABASE_URL?.includes('sslmode=require');
-    
-    const needsSSL = !forceNoSSL && (
-      sslRequired ||
-      (process.env.NODE_ENV === 'production' && process.env.DB_HOST && process.env.DB_HOST !== 'localhost') ||
-      process.env.VERCEL
-    );
-    
     console.log('SSL configuration:', { 
       needsSSL, 
       forceNoSSL, 
-      sslRequired, 
+      sslRequired,
+      hasSelfSignedCertIssue,
       dbHost: process.env.DB_HOST,
       nodeEnv: process.env.NODE_ENV 
     });
     
-    let sslConfig: boolean | { rejectUnauthorized: boolean } = false;
+    let sslConfig: boolean | { rejectUnauthorized: boolean; ca?: string } = false;
     if (needsSSL) {
       sslConfig = { 
-        rejectUnauthorized: false
+        rejectUnauthorized: false // Разрешаем самоподписанные сертификаты
       };
+      
+      // Для дополнительной совместимости с самоподписанными сертификатами
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      console.log('SSL configured to accept self-signed certificates');
     }
     
     pool = new Pool({
@@ -161,7 +176,17 @@ export async function testConnection(): Promise<boolean> {
 // Database initialization
 export async function initializeDatabase() {
   try {
+    console.log('Starting database initialization...');
+    
+    // Проверяем подключение перед инициализацией
+    const connectionTest = await testConnection();
+    if (!connectionTest) {
+      throw new Error('Cannot connect to database before initialization');
+    }
+    console.log('Database connection verified, proceeding with initialization...');
+    
     // Создание таблицы пользователей
+    console.log('Creating users table...');
     await query(` 
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -309,5 +334,11 @@ export async function initializeDatabase() {
     console.log('Database tables initialized successfully');
   } catch (error) {
     console.error('Error initializing database:', error);
+    console.error('Database initialization failed with details:', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      code: error && typeof error === 'object' && 'code' in error ? error.code : undefined,
+      detail: error && typeof error === 'object' && 'detail' in error ? error.detail : undefined
+    });
+    throw error; // Re-throw чтобы API endpoints могли обработать ошибку
   }
 }
