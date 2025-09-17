@@ -20,12 +20,12 @@ export function getPool(): Pool {
     console.log('DATABASE_URL:', process.env.DATABASE_URL ? '[SET]' : '[NOT SET]');
     console.log('DISABLE_SSL:', process.env.DISABLE_SSL || '[NOT SET]');
     
-    // ПРИНУДИТЕЛЬНАЯ ПРОВЕРКА - если переменные не установлены, используем хардкод для диагностики
-    const dbHost = process.env.DB_HOST || '92.246.76.171';
-    const dbPort = process.env.DB_PORT || '5432';
-    const dbName = process.env.DB_NAME || 'RecipeMatch';
-    const dbUser = process.env.DB_USER || 'postgres';
-    const dbPassword = process.env.DB_PASSWORD || 'SATtem2002';
+    // Используем только переменные окружения
+    const dbHost = process.env.DB_HOST;
+    const dbPort = process.env.DB_PORT;
+    const dbName = process.env.DB_NAME;
+    const dbUser = process.env.DB_USER;
+    const dbPassword = process.env.DB_PASSWORD;
     
     console.log('USING VALUES:', {
       host: dbHost,
@@ -35,18 +35,20 @@ export function getPool(): Pool {
       passwordSet: !!dbPassword
     });
     
-    const testConnectionString = `postgresql://${dbUser}:****@${dbHost}:${dbPort}/${dbName}`;
-    console.log('WILL ATTEMPT CONNECTION TO:', testConnectionString);
+    if (!process.env.DATABASE_URL && dbHost && dbUser && dbName) {
+      const testConnectionString = `postgresql://${dbUser}:****@${dbHost}:${dbPort}/${dbName}`;
+      console.log('WILL ATTEMPT CONNECTION TO:', testConnectionString);
+    }
     console.log('================================================');
 
     // Проверяем наличие обязательных переменных
-    if (!process.env.DATABASE_URL && (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_PASSWORD || !process.env.DB_NAME)) {
+    if (!process.env.DATABASE_URL && (!dbHost || !dbUser || !dbPassword || !dbName)) {
       const missingVars = [];
       if (!process.env.DATABASE_URL) missingVars.push('DATABASE_URL');
-      if (!process.env.DB_HOST) missingVars.push('DB_HOST');
-      if (!process.env.DB_USER) missingVars.push('DB_USER');
-      if (!process.env.DB_PASSWORD) missingVars.push('DB_PASSWORD');
-      if (!process.env.DB_NAME) missingVars.push('DB_NAME');
+      if (!dbHost) missingVars.push('DB_HOST');
+      if (!dbUser) missingVars.push('DB_USER');
+      if (!dbPassword) missingVars.push('DB_PASSWORD');
+      if (!dbName) missingVars.push('DB_NAME');
       
       console.error('Missing environment variables:', missingVars);
       throw new Error(`Database configuration missing. Missing variables: ${missingVars.join(', ')}`);
