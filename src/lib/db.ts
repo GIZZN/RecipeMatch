@@ -4,13 +4,37 @@ let pool: Pool | null = null;
 
 export function getPool(): Pool {
   if (!pool) {
+    // Детальная диагностика переменных окружения
+    console.log('=== DATABASE CONNECTION DIAGNOSTICS ===');
+    console.log('All environment variables:', Object.keys(process.env).filter(key => key.startsWith('DB_') || key === 'DATABASE_URL' || key === 'NODE_ENV' || key === 'VERCEL'));
+    console.log('DATABASE_URL:', process.env.DATABASE_URL ? '[SET]' : '[NOT SET]');
+    console.log('DB_HOST:', process.env.DB_HOST || '[NOT SET]');
+    console.log('DB_PORT:', process.env.DB_PORT || '[NOT SET]');
+    console.log('DB_NAME:', process.env.DB_NAME || '[NOT SET]');
+    console.log('DB_USER:', process.env.DB_USER || '[NOT SET]');
+    console.log('DB_PASSWORD:', process.env.DB_PASSWORD ? '[SET]' : '[NOT SET]');
+    console.log('DB_SSL:', process.env.DB_SSL || '[NOT SET]');
+    console.log('NODE_ENV:', process.env.NODE_ENV || '[NOT SET]');
+    console.log('VERCEL:', process.env.VERCEL || '[NOT SET]');
+    console.log('==========================================');
+
     // Проверяем наличие обязательных переменных
     if (!process.env.DATABASE_URL && (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_PASSWORD || !process.env.DB_NAME)) {
-      throw new Error('Database configuration missing. Please set DATABASE_URL or DB_HOST, DB_USER, DB_PASSWORD, DB_NAME environment variables.');
+      const missingVars = [];
+      if (!process.env.DATABASE_URL) missingVars.push('DATABASE_URL');
+      if (!process.env.DB_HOST) missingVars.push('DB_HOST');
+      if (!process.env.DB_USER) missingVars.push('DB_USER');
+      if (!process.env.DB_PASSWORD) missingVars.push('DB_PASSWORD');
+      if (!process.env.DB_NAME) missingVars.push('DB_NAME');
+      
+      console.error('Missing environment variables:', missingVars);
+      throw new Error(`Database configuration missing. Missing variables: ${missingVars.join(', ')}`);
     }
 
     const connectionString = process.env.DATABASE_URL || 
       `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT || '5432'}/${process.env.DB_NAME}`;
+    
+    console.log('Connection string (masked):', connectionString.replace(/:([^:@]+)@/, ':****@'));
     
     // Логируем информацию о подключении (без паролей)
     console.log('Environment:', {
@@ -85,11 +109,23 @@ export async function query(text: string, params?: (string | number | boolean | 
   let client;
   
   try {
+    console.log('Attempting to connect to database...');
     client = await pool.connect();
+    console.log('Database connection successful');
+    
     const result = await client.query(text, params);
+    console.log('Query executed successfully');
     return result;
   } catch (error) {
     console.error('Database query error:', error);
+    console.error('Error details:', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      code: error && typeof error === 'object' && 'code' in error ? error.code : undefined,
+      errno: error && typeof error === 'object' && 'errno' in error ? error.errno : undefined,
+      syscall: error && typeof error === 'object' && 'syscall' in error ? error.syscall : undefined,
+      address: error && typeof error === 'object' && 'address' in error ? error.address : undefined,
+      port: error && typeof error === 'object' && 'port' in error ? error.port : undefined
+    });
     throw error;
   } finally {
     if (client) {
