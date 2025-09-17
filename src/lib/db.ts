@@ -4,19 +4,40 @@ let pool: Pool | null = null;
 
 export function getPool(): Pool {
   if (!pool) {
-    // Детальная диагностика переменных окружения
-    console.log('=== DATABASE CONNECTION DIAGNOSTICS ===');
-    console.log('All environment variables:', Object.keys(process.env).filter(key => key.startsWith('DB_') || key === 'DATABASE_URL' || key === 'NODE_ENV' || key === 'VERCEL'));
+    // КРИТИЧЕСКАЯ ДИАГНОСТИКА - ПОКАЗЫВАЕМ ВСЕ ПЕРЕМЕННЫЕ
+    console.log('=== CRITICAL DATABASE CONNECTION DIAGNOSTICS ===');
+    console.log('VERCEL ENVIRONMENT:', process.env.VERCEL);
+    console.log('NODE_ENV:', process.env.NODE_ENV);
+    
+    // Показываем ВСЕ переменные, начинающиеся с DB_
+    const dbVars = Object.keys(process.env).filter(key => key.startsWith('DB_'));
+    console.log('ALL DB_ VARIABLES FOUND:', dbVars);
+    dbVars.forEach(key => {
+      const value = key.includes('PASSWORD') ? '[HIDDEN]' : process.env[key];
+      console.log(`${key}:`, value || '[NOT SET]');
+    });
+    
     console.log('DATABASE_URL:', process.env.DATABASE_URL ? '[SET]' : '[NOT SET]');
-    console.log('DB_HOST:', process.env.DB_HOST || '[NOT SET]');
-    console.log('DB_PORT:', process.env.DB_PORT || '[NOT SET]');
-    console.log('DB_NAME:', process.env.DB_NAME || '[NOT SET]');
-    console.log('DB_USER:', process.env.DB_USER || '[NOT SET]');
-    console.log('DB_PASSWORD:', process.env.DB_PASSWORD ? '[SET]' : '[NOT SET]');
-    console.log('DB_SSL:', process.env.DB_SSL || '[NOT SET]');
-    console.log('NODE_ENV:', process.env.NODE_ENV || '[NOT SET]');
-    console.log('VERCEL:', process.env.VERCEL || '[NOT SET]');
-    console.log('==========================================');
+    console.log('DISABLE_SSL:', process.env.DISABLE_SSL || '[NOT SET]');
+    
+    // ПРИНУДИТЕЛЬНАЯ ПРОВЕРКА - если переменные не установлены, используем хардкод для диагностики
+    const dbHost = process.env.DB_HOST || '92.246.76.171';
+    const dbPort = process.env.DB_PORT || '5432';
+    const dbName = process.env.DB_NAME || 'RecipeMatch';
+    const dbUser = process.env.DB_USER || 'postgres';
+    const dbPassword = process.env.DB_PASSWORD || 'SATtem2002';
+    
+    console.log('USING VALUES:', {
+      host: dbHost,
+      port: dbPort,
+      database: dbName,
+      user: dbUser,
+      passwordSet: !!dbPassword
+    });
+    
+    const testConnectionString = `postgresql://${dbUser}:****@${dbHost}:${dbPort}/${dbName}`;
+    console.log('WILL ATTEMPT CONNECTION TO:', testConnectionString);
+    console.log('================================================');
 
     // Проверяем наличие обязательных переменных
     if (!process.env.DATABASE_URL && (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_PASSWORD || !process.env.DB_NAME)) {
@@ -39,15 +60,20 @@ export function getPool(): Pool {
     // Если есть проблемы с самоподписанными сертификатами, можно отключить SSL
     const hasSelfSignedCertIssue = process.env.ALLOW_SELF_SIGNED_CERT === 'true';
     
-    const needsSSL = !forceNoSSL && (
-      sslRequired ||
-      (process.env.NODE_ENV === 'production' && process.env.DB_HOST && process.env.DB_HOST !== 'localhost') ||
-      process.env.VERCEL
-    );
+    // SSL отключается принудительно, если установлен DISABLE_SSL
+    const needsSSL = !forceNoSSL && sslRequired;
     
-    // Формируем строку подключения
+    console.log('SSL decision logic:', {
+      forceNoSSL,
+      sslRequired,
+      needsSSL,
+      DB_SSL: process.env.DB_SSL,
+      DISABLE_SSL: process.env.DISABLE_SSL
+    });
+    
+    // Формируем строку подключения с принудительными значениями
     let connectionString = process.env.DATABASE_URL || 
-      `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT || '5432'}/${process.env.DB_NAME}`;
+      `postgresql://${dbUser}:${dbPassword}@${dbHost}:${dbPort}/${dbName}`;
     
     // Если отключаем SSL, добавляем параметр в строку подключения
     if (forceNoSSL && !process.env.DATABASE_URL) {
@@ -58,16 +84,16 @@ export function getPool(): Pool {
     console.log('Connection string (masked):', connectionString.replace(/:([^:@]+)@/, ':****@'));
     
     // Логируем информацию о подключении (без паролей)
-    console.log('Environment:', {
+    console.log('Final Environment Values:', {
       NODE_ENV: process.env.NODE_ENV,
       VERCEL: process.env.VERCEL,
       DATABASE_URL_EXISTS: !!process.env.DATABASE_URL,
-      DB_HOST: process.env.DB_HOST,
-      DB_PORT: process.env.DB_PORT || '5432',
-      DB_NAME: process.env.DB_NAME,
-      DB_USER: process.env.DB_USER,
+      FINAL_DB_HOST: dbHost,
+      FINAL_DB_PORT: dbPort,
+      FINAL_DB_NAME: dbName,
+      FINAL_DB_USER: dbUser,
       DB_SSL: process.env.DB_SSL,
-      HAS_PASSWORD: !!process.env.DB_PASSWORD
+      HAS_PASSWORD: !!dbPassword
     });
     
     console.log('SSL configuration:', { 
